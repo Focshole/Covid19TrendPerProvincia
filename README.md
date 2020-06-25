@@ -11,4 +11,5 @@ The updated plots will be produced in Covid directory as PNG images.
 All the requirements should be already satisfied.
 
 
-![example_plot](Covid/Covid%20new%20infections%20in%20Roma%20RM%20per%20day.png)
+![example_plot1](Covid/Covid%20new%20infections%20in%20Roma%20RM%20per%20day.png)
+![example_plot2](Covid/Covid%20new%20infections%20in%20Milano%20MI%20per%20day.png)
