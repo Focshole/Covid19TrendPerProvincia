@@ -98,7 +98,7 @@ def main2():
                 province=province.split(' ')[1]
                 newInfections=diffInfectionsPerCsv(province,oldCsv,newCsv)
                 print(f"{d} new infections in {province}: {newInfections}")
-                plotx[i].append(str(d))
+                plotx[i].append(f"{d.day:02}/{d.month:02}")
                 ploty[i].append(newInfections)
             oldCsv=newCsv
         d+=timedelta(days=1)
@@ -116,7 +116,7 @@ def plot_graph(x,y,province,save=True,dont_print=False):
     plt.grid(True)
     howManyLabelsToPlot=30
     ticks=[(i*math.floor(len(x)/howManyLabelsToPlot)+1)%len(x) for i in range(howManyLabelsToPlot) ]
-    plt.xticks(ticks,rotation="45")
+    plt.xticks(ticks,rotation="vertical")#was 45, but with 45 it is not aligned as you may intuitively think when watching the plot
     if save:
         plt.savefig(f'./Covid/Covid new infections in {province} per day.png', dpi=300)
     if not dont_print:
