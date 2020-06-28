@@ -4,7 +4,11 @@ import requests
 import matplotlib.pyplot as plt
 from datetime import date, timedelta
 verbose=False
+
+
+
 fn=["data","stato","codice_regione","denominazione_regione","codice_provincia","denominazione_provincia","sigla_provincia","lat","long","totale_casi","note_it","note_en"]
+
 def getCsv(d):
     assert type(d)==date
     url = f"https://raw.github.com/pcm-dpc/COVID-19/master/dati-province/dpc-covid19-ita-province-{d.year}{d.month:02}{d.day:02}.csv"
@@ -19,7 +23,7 @@ def getCsv(d):
     if r.status_code!=200:
         if verbose:
             print(f"Downloading {d} csv data failed!")
-        return False
+        return None
     else:
         csv_file_splitted=(csv_file_content.decode("UTF-8")).splitlines()
         csv_file_reader=csv.DictReader(csv_file_splitted)
@@ -28,17 +32,27 @@ def getCsv(d):
 
 def getProvinceDataFromCsv(c,province):
     assert len(province)==2 and province.isupper()
+    assert type(c)==list 
+    assert len(c)>0 
+    assert type(c[0])==dict
+   
     for row in c:
-        if province == row["sigla_provincia"]:
+        if "sigla_provincia" in row and province == row["sigla_provincia"]:
             return row
 
 
 
 def diffInfectionsPerCsv(province,csv0,csv1):
     assert len(province)==2 and province.isupper()
+    assert csv0 is not None and csv1 is not None
+    assert type(csv0)==list and type(csv1)==list
+    assert len(csv0)>0 and len(csv1)>0
     d0_prov_data=getProvinceDataFromCsv(csv0,province)
     d1_prov_data=getProvinceDataFromCsv(csv1,province)
-    return int(d1_prov_data["totale_casi" ]) - int(d0_prov_data["totale_casi"])
+    if d0_prov_data is not None and d1_prov_data is not None:
+        return int(d1_prov_data["totale_casi" ]) - int(d0_prov_data["totale_casi"])
+    else:
+        return None
 
 def diffInfectionsPerDate(province,d0,d1):
     assert len(province)==2 and province.isupper()
@@ -46,7 +60,10 @@ def diffInfectionsPerDate(province,d0,d1):
     assert d0<d1
     d0_data=getCsv(d0)
     d1_data=getCsv(d1)
-    return diffInfectionsPerCsv(province,d0_data,d1_data)
+    if d0_data is not None and d1_data is not None:
+        return diffInfectionsPerCsv(province,d0_data,d1_data)
+    else:
+        return None
 
 
 def diffInfectionsPerDay(province,d):
@@ -66,12 +83,14 @@ def main():
     ploty=list()
     d=starting_date+timedelta(days=1)
     while d<=ending_date:
+        print(f"Fetching {d} data...")
         newCsv=getCsv(d)
         if newCsv==None:
-            print("No data available for date {d}!")
+            print(f"No data available for date {d}!")
         else:
             newInfections=diffInfectionsPerCsv(province,oldCsv,newCsv)
-            print(f"{d} new infections in {province}: {newInfections}")
+            if verbose:
+                print(f"{d} new infections in {province}: {newInfections}")
             plotx.append(str(d))
             ploty.append(newInfections)
             oldCsv=newCsv
@@ -90,20 +109,26 @@ def main2():
     plotx=[list() for index in provinces]
     ploty=[list() for index in provinces]
     while d<=ending_date:
+        print(f"Fetching {d} data...")
         newCsv=getCsv(d)
         if newCsv==None:
-            print("No data available for date {d}!")
+            print(f"No data available for date {d}!")
         else:
             for i,province in enumerate(provinces):
                 province=province.split(' ')[1]
                 newInfections=diffInfectionsPerCsv(province,oldCsv,newCsv)
-                print(f"{d} new infections in {province}: {newInfections}")
-                plotx[i].append(f"{d.day:02}/{d.month:02}")
-                ploty[i].append(newInfections)
+                if newInfections is not None:
+                    if verbose:
+                        print(f"{d} new infections in {province}: {newInfections}")
+                    plotx[i].append(f"{d.day:02}/{d.month:02}")
+                    ploty[i].append(newInfections)
             oldCsv=newCsv
         d+=timedelta(days=1)
+    print("Saving graphs, may require some time...")
     for i,province in enumerate(provinces):
         save_graph(plotx[i],ploty[i],province)
+    print("Done!")
+
 
 def save_graph(x,y,province):
     return plot_graph(x,y,province,save=True,dont_print=True)
@@ -116,9 +141,19 @@ def plot_graph(x,y,province,save=True,dont_print=False):
     plt.grid(True)
     howManyLabelsToPlot=30
     ticks=[(i*math.floor(len(x)/howManyLabelsToPlot)+1)%len(x) for i in range(howManyLabelsToPlot) ]
+    lastTick=len(x)-1
+    if  lastTick not in ticks:
+        ticks.append(lastTick)
+    firstTick=0 # from now on, this should be always inserted. Probably i may change the logic above and always insert the first tick. who knows
+    if firstTick not in ticks:
+        ticks.insert(0,0)
     plt.xticks(ticks,rotation="vertical")#was 45, but with 45 it is not aligned as you may intuitively think when watching the plot
     if save:
+        if verbose:
+            print("Saving {province} graph in ./Covid/Covid new infections in {province} per day.png...")
         plt.savefig(f'./Covid/Covid new infections in {province} per day.png', dpi=300)
+        if verbose:
+            print("Saved {province} graph!")
     if not dont_print:
         plt.show()
     plt.clf()
