@@ -140,13 +140,14 @@ def plot_graph(x,y,province,save=True,dont_print=False):
     plt.title(f'Covid new infections per day in {province}')
     plt.grid(True)
     howManyLabelsToPlot=30
-    ticks=[(i*math.floor(len(x)/howManyLabelsToPlot)+1)%len(x) for i in range(howManyLabelsToPlot) ]
+    slidingWindow=0#useful to shift the grid
+    ticks=[(i*math.floor(len(x)/howManyLabelsToPlot)+slidingWindow)%len(x) for i in range(howManyLabelsToPlot) ]
     lastTick=len(x)-1
     if  lastTick not in ticks:
         ticks.append(lastTick)
-    firstTick=0 # from now on, this should be always inserted. Probably i may change the logic above and always insert the first tick. who knows
-    if firstTick not in ticks:
-        ticks.insert(0,0)
+    #firstTick=0 # from now on, this should be always inserted. Probably i may change the logic above and always insert the first tick. who knows
+    #if firstTick not in ticks:
+    #    ticks.insert(0,0)
     plt.xticks(ticks,rotation="vertical")#was 45, but with 45 it is not aligned as you may intuitively think when watching the plot
     if save:
         if verbose:
