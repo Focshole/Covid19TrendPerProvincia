@@ -139,9 +139,12 @@ def plot_graph(x,y,province,save=True,dont_print=False):
     plt.ylabel('New Infections') 
     plt.title(f'Covid new infections per day in {province}')
     plt.grid(True)
-    howManyLabelsToPlot=30
-    slidingWindow=0#useful to shift the grid
-    ticks=[(i*math.floor(len(x)/howManyLabelsToPlot)+slidingWindow)%len(x) for i in range(howManyLabelsToPlot) ]
+    
+    howManyLabelsToPlot=math.floor(len(x)/7) #one label every 7 days
+    slidingWindow=(len(x)-1)%7 # useful to shift the grid
+    ticks=[(i * 7 + slidingWindow) % len(x) for i in range(howManyLabelsToPlot) ]
+    #take one tick every 7 days. the " % len(x)" is to make it circular if the last tick is not included
+    
     lastTick=len(x)-1
     if  lastTick not in ticks:
         ticks.append(lastTick)
@@ -151,10 +154,10 @@ def plot_graph(x,y,province,save=True,dont_print=False):
     plt.xticks(ticks,rotation="vertical")#was 45, but with 45 it is not aligned as you may intuitively think when watching the plot
     if save:
         if verbose:
-            print("Saving {province} graph in ./Covid/Covid new infections in {province} per day.png...")
+            print(f"Saving {province} graph in ./Covid/Covid new infections in {province} per day.png...")
         plt.savefig(f'./Covid/Covid new infections in {province} per day.png', dpi=300)
         if verbose:
-            print("Saved {province} graph!")
+            print(f"Saved {province} graph!")
     if not dont_print:
         plt.show()
     plt.clf()
