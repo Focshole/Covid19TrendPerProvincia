@@ -23,4 +23,4 @@ All the requirements should be already satisfied, if not, check the file require
 
 ![example_plot](Covid/Covid%20new%20infections%20per%20day%20in%20Milano%20MI.png)
 ![example_plot_normalized](Covid_n/Covid%20new%20infections%20per%20day%20in%20Milano%20MI%20normalized.png)
-![example_plot3](Covid_infection_per_test_est_n/Covid%20estimated%20growing%20rate%20in%20Milano%20MI%20normalized.png)
+![example_plot3](Covid_infection_per_test_est_n/Covid%20infections%20per%20tests%20in%20Milano%20MI%20normalized.png)
