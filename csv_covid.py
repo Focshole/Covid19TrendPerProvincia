@@ -4,20 +4,64 @@ import requests
 import matplotlib.pyplot as plt
 from datetime import date, timedelta
 import concurrent.futures
-
+import sys
+import requests_cache
+#TODO add some decent comments to this code
+ENABLE_CACHE=True
 # I know, i should use panda for CSVs, cause Fiat Pandas are reliable, but I'm too lazy, sry
 
-MAX_CONNECTIONS = 6  # https://stackoverflow.com/questions/985431/max-parallel-http-connections-in-a-browser
-SAVE_IMAGE_DPI = 300 # image saving quality
+SMOOTH_DATA_DAYS_FACTOR = 2  # how many days before and after should be considered to smooth data. if value is set to 1, each value gets smoothed with the day before and the day after
+STDDEV_CRISPNESS = 1  # how the smoothness should be. if 1, 68.3% of the values are set considering the central day
 
-def preProcessing(csv_as_a_list):
+MAX_CONNECTIONS = 6  # https://stackoverflow.com/questions/985431/max-parallel-http-connections-in-a-browser
+SAVE_IMAGE_DPI = 300  # image saving quality
+
+# Possible future work, model with a markov chain smh
+# Markov chain: no_inf -> exp beginning -> stall -> decreasing ->no_inf
+#                                        --------->
+
+def initialize_plot(p_a):
+    return {p: list() for p in p_a}
+
+
+def fdr_norm(value, dev_std, avg=0):  # fdr =
+    z = (value - avg )/dev_std # normalization
+    return 0.5 * (1 + math.erf(z / (math.sqrt(2))))  # Cumulative distribution function for norm distr
+
+
+def data_norm(values, center_index=None):  # we need to normalize data
+    assert type(values) == list  # center data with day in position math.floor(len(values)/2)
+    if center_index is None:
+        center_index = math.floor(len(values) / 2)  # as default it is set to its central value,
+        # cause we want to consider data relevance as shown here https://commons.wikimedia.org/wiki/File:Gaussian_Filter.svg
+    normalized_value = 0
+    coeff_sum=0
+    for i, val in enumerate(values):
+        upper_bound = (i - center_index + 0.5)  # useless for last element
+        lower_bound = upper_bound - 1  # useless for first element
+        if i == len(values) - 1 and i == 0:
+            coeff=1
+        elif i == len(values) - 1: #last
+            coeff=1-fdr_norm(lower_bound, STDDEV_CRISPNESS)
+        elif i == 0:
+            coeff=fdr_norm(upper_bound, STDDEV_CRISPNESS)
+        else:
+            coeff = (fdr_norm(upper_bound, STDDEV_CRISPNESS) - fdr_norm(lower_bound, STDDEV_CRISPNESS))
+        normalized_value += coeff * val
+        coeff_sum+=coeff
+    assert coeff_sum>1-sys.float_info.epsilon and coeff_sum<1+sys.float_info.epsilon
+    return normalized_value
+
+
+def pre_processing(csv_as_a_list):
     rename = ["Ascoli Piceno", "La Spezia", "Reggio Calabria",
-              "Reggio Emilia", "Vibo Valentia", "Sud Sardegna", "Friuli-Venezia Giulia","Friuli Venezia Giulia"]
+              "Reggio Emilia", "Vibo Valentia", "Sud Sardegna", "Friuli-Venezia Giulia", "Friuli Venezia Giulia"]
     for i, row in enumerate(csv_as_a_list):
         if "denominazione_regione" in row:  # Provinces and regions
             region_name = row["denominazione_regione"]
-            if "P.A." in region_name: # Allows me to have a higher precision in those provinces
-                csv_as_a_list[i]["denominazione_regione"] = csv_as_a_list[i]["denominazione_regione"].replace("P.A. ","PA-")
+            if "P.A." in region_name:  # Allows me to have a higher precision in those provinces
+                csv_as_a_list[i]["denominazione_regione"] = csv_as_a_list[i]["denominazione_regione"].replace("P.A. ",
+                                                                                                              "PA-")
             elif region_name == "Valle d'Aosta":
                 csv_as_a_list[i]["denominazione_regione"] = "Valle-d-Aosta"
             elif region_name in rename:
@@ -26,7 +70,7 @@ def preProcessing(csv_as_a_list):
         if "Territorio" in row:
             csv_as_a_list[i]['Territorio'] = row['Territorio'].split(' /')[0]  # remove dialect names
             if csv_as_a_list[i]["Territorio"] == "Valle d'Aosta":
-                if len(row['\ufeff"ITTER107"'])==4:  # region
+                if len(row['\ufeff"ITTER107"']) == 4:  # region
                     csv_as_a_list[i]["Territorio"] = "Valle-d-Aosta"
                 else:
                     csv_as_a_list[i]["Territorio"] = "Aosta"
@@ -43,9 +87,10 @@ def preProcessing(csv_as_a_list):
             elif csv_as_a_list[i]["Territorio"] == "Reggio nell'Emilia":
                 csv_as_a_list[i]["Territorio"] = "Reggio-Emilia"
             elif csv_as_a_list[i]["Territorio"] in rename:
-                csv_as_a_list[i]["Territorio"] = csv_as_a_list[i]["Territorio"].replace(" ","-")
+                csv_as_a_list[i]["Territorio"] = csv_as_a_list[i]["Territorio"].replace(" ", "-")
                 # to avoid problems in file naming
-            elif csv_as_a_list[i]["Territorio"]== "Provincia Autonoma Bolzano" or csv_as_a_list[i]["Territorio"]== "Provincia Autonoma Trento":
+            elif csv_as_a_list[i]["Territorio"] == "Provincia Autonoma Bolzano" or csv_as_a_list[i][
+                "Territorio"] == "Provincia Autonoma Trento":
                 csv_as_a_list[i]["Territorio"] = csv_as_a_list[i]["Territorio"].replace("Provincia Autonoma ", "PA-")
     return csv_as_a_list
 
@@ -64,7 +109,7 @@ def download_csv(url):
         csv_file_reader = csv.DictReader(csv_file_splitted)
         csv_as_a_list = list(csv_file_reader)
         # Pre processing, it is extremely ugly. I'm lazy and I don't want to refactor it by now
-        return preProcessing(csv_as_a_list)
+        return pre_processing(csv_as_a_list)
 
 
 fn = ["data", "stato", "codice_regione", "denominazione_regione", "codice_provincia", "denominazione_provincia",
@@ -74,12 +119,12 @@ fn = ["data", "stato", "codice_regione", "denominazione_regione", "codice_provin
 def get_population_per_territory_csv(territory_names):
     url = "https://dati.istat.it/Download.ashx?type=csv&Delimiter=%2c&IncludeTimeSeriesIdentifiers=False&LabelType=CodeAndLabel&LanguageCode=it"
     csv_as_a_list = download_csv(url)
-    if csv_as_a_list is None:  # istat services is offline
+    if csv_as_a_list is None:  # istat services are offline
         # fetch the local file
         with open("DCIS_POPRES1_14102020171844268.csv", "r") as f:
             csv_file_splitted = f.read().splitlines()
         csv_file_reader = csv.DictReader(csv_file_splitted)
-        csv_as_a_list = preProcessing(list(csv_file_reader))
+        csv_as_a_list = pre_processing(list(csv_file_reader))
     reduced_csv = list()
 
     for entry in csv_as_a_list:
@@ -115,45 +160,43 @@ def get_provinces_csv_multithread(d):
     return download_csv(url), d
 
 
-def get_province_data_from_csv(c, province):
-    assert len(province) == 2 and province.isupper()
+def get_province_infections_from_csv(c):
     assert type(c) == list
     assert len(c) > 0
-    assert type(c[0]) == dict
-
+    assert type(c[0]) == dict  # I know, it's a dumb assert but it saved me some times
+    infections = {}
     for row in c:
-        if "sigla_provincia" in row and province == row["sigla_provincia"]:
-            return row
+        if "sigla_provincia" in row:
+            infections[row["sigla_provincia"]] = int(row["totale_casi"])
+    return infections
 
 
-def diff_infections_between_csv(province, csv0, csv1):
-    assert len(province) == 2 and province.isupper()
+def diff_infections_between_csv(csv0, csv1, provinces_abbr):  # convenient for batch downloads
     assert csv0 is not None and csv1 is not None
     assert type(csv0) == list and type(csv1) == list
-    assert len(csv0) > 0 and len(csv1) > 0
-    d0_prov_data = get_province_data_from_csv(csv0, province)
-    d1_prov_data = get_province_data_from_csv(csv1, province)
-    if d0_prov_data is not None and d1_prov_data is not None:
-        return int(d1_prov_data["totale_casi"]) - int(d0_prov_data["totale_casi"])
-    else:
-        return None
+    assert len(csv0) > 0
+    infections = get_province_infections_from_csv(csv0)
+    infections1 = get_province_infections_from_csv(csv1)
+    for p in provinces_abbr:
+        if p not in infections or p not in infections1:
+            infections[p] = None
+        else:
+            infections[p] = infections1[p] - infections[p]
+    return infections
 
 
-def diff_infections_per_date(province, d0, d1):
-    assert len(province) == 2 and province.isupper()
+def diff_infections_per_date(d0, d1, provinces_abbr):  # convenient for a few downloads
     assert type(d0) == date and type(d1) == date
     assert d0 < d1
     d0_data = get_provinces_csv(d0)
     d1_data = get_provinces_csv(d1)
     if d0_data is not None and d1_data is not None:
-        return diff_infections_between_csv(province, d0_data, d1_data)
-    else:
-        return None
+        return diff_infections_between_csv(d0_data, d1_data, provinces_abbr)
 
 
-def diff_infections_per_day(province, d):
+def diff_infections_per_day(d, provinces_abbr):  # convenient for a few downloads
     d0 = d - timedelta(days=1)  # d0 = previous day
-    return diff_infections_per_date(province, d0, d)
+    return diff_infections_per_date(d0, d, provinces_abbr)
 
 
 def get_provinces_data_csv_indexed(starting_date, ending_date):
@@ -169,6 +212,7 @@ def get_provinces_data_csv_indexed(starting_date, ending_date):
                 indexed_csv[data[1]] = data[0]
     return indexed_csv
 
+
 def get_regions_data_csv_indexed(starting_date, ending_date):
     distance = (ending_date - starting_date).days
     indexed_csv = {}
@@ -180,12 +224,13 @@ def get_regions_data_csv_indexed(starting_date, ending_date):
             indexed_csv[data[1]] = data[0]
     return indexed_csv
 
-def save_graph(x, y, title, xlabel, ylabel,path="./Covid"):
-    return plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=True,path=path)
+
+def save_graph(x, y, title, xlabel, ylabel, path="./Covid"):
+    return plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=True, path=path)
 
 
-def plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=False,path="./Covid"):
-    plt.plot(x, y, linestyle='dashed', linewidth=2, marker='o', markerfacecolor='black', markersize=3)
+def plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=False, path="./Covid"):
+    plt.plot(x, y, linestyle='dashed', linewidth=1, marker='o', markerfacecolor='blue', markersize=2)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
@@ -216,10 +261,10 @@ def get_prov_region_mapping(prov_csv_sample, provinces_name, provinces_abbr):
     for row in prov_csv_sample:
         if "sigla_provincia" in row and row['sigla_provincia'] in provinces_abbr:
             corresponding_prov_name = provinces_name[provinces_abbr.index(row["sigla_provincia"])]
-            region_name=row["denominazione_regione"]
+            region_name = row["denominazione_regione"]
             prov_region_mapping[corresponding_prov_name] = region_name
-            prov_region_mapping[row["sigla_provincia"]] =  region_name# duplicated to avoid any further pain
-    assert len(prov_region_mapping) == 2*len(provinces_name)
+            prov_region_mapping[row["sigla_provincia"]] = region_name  # duplicated to avoid any further pain
+    assert len(prov_region_mapping) == 2 * len(provinces_name)
     return prov_region_mapping
 
 
@@ -228,51 +273,49 @@ def get_province_ratio(pop_csv, provinces_name, provinces_abbr, regions, prov_re
     pop_provs = {}
     pop_regions = {}
     for row in pop_csv:
-        if row["Territorio"] in regions and len(row['\ufeff"ITTER107"'])==4: #len=4 identifies a region
+        if row["Territorio"] in regions and len(row['\ufeff"ITTER107"']) == 4:  # len=4 identifies a region
             assert row["Territorio"] not in pop_regions
             pop_regions[row["Territorio"]] = int(row["Value"])
-        if row["Territorio"] in provinces_name and len(row['\ufeff"ITTER107"'])==5: #len=4 identifies a province
+        if row["Territorio"] in provinces_name and len(row['\ufeff"ITTER107"']) == 5:  # len=4 identifies a province
             assert row["Territorio"] not in pop_provs  # shouldn't have been inserted by now
             assert row["Territorio"] in prov_region_mapping
             # but it should be present in the province/region mapping indexed array
             pop_provs[row["Territorio"]] = int(row["Value"])  # save it for long name cities
 
     assert len(pop_regions) == len(regions)
-    for k in pop_provs:
-        if k not in provinces_name:
-            print("pop_provs",k)
-    for k in provinces_name:
-        if k not in pop_provs:
-            print("provinces_name",k)
     assert len(pop_provs) == len(provinces_name)
     # we got the pop data, I can calculate the ratio
     ratio_per_province = {}
-    for p in zip(provinces_abbr, provinces_name):
-        region = prov_region_mapping[p[0]]
+    for p_abb, p_name in zip(provinces_abbr, provinces_name):
+        region = prov_region_mapping[p_abb]
         pop_r = pop_regions[region]
-        pop_p = pop_provs[p[1]]  # it is indexed by long name
+        pop_p = pop_provs[p_name]  # it is indexed by long name
         ratio = pop_p / pop_r
-        ratio_per_province[p[0]] = ratio
-        ratio_per_province[p[1]] = ratio
+        ratio_per_province[p_abb] = ratio
+        ratio_per_province[p_name] = ratio
 
-    #if you want to add some post processing (eg gaussian distribution), add it here
+    # if you want to add some post processing (eg gaussian distribution), add it here
 
     return ratio_per_province
 
 
-def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping,ratio, daily_regs_csv):
+def estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv):
     if daily_regs_csv is not None:
-        tests_per_province={}
-        tests_per_region={}
+        tests_per_province = {}
+        tests_per_region = {}
         for l in daily_regs_csv:
-            tests_per_region[l["denominazione_regione"]]=int(l["tamponi"])-int(l["dimessi_guariti"])
+            tests_per_region[l["denominazione_regione"]] = int(l["tamponi"])
         for p in provinces_abbr:
-            tests_per_province[p]=tests_per_region[prov_region_mapping[p]]*ratio[p]
+            tests_per_province[p] = tests_per_region[prov_region_mapping[p]] * ratio[p]
         return tests_per_province
     return None
-
-
-
+def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0,daily_regs_csv):
+    tests_per_province = {}
+    t0=estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0)
+    t = estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv)
+    for p in provinces_abbr:
+        tests_per_province[p]=t[p]-t0[p]
+    return tests_per_province
 
 def main():
     starting_date = date(2020, 2, 24)
@@ -284,76 +327,180 @@ def main():
             tmp = l.split(' ')
             provinces_name.append(tmp[0])
             provinces_abbr.append(tmp[1])
-            # I would need some kind of a bidirectional map, but it is much harder to handle. I'll stick to this awful method by now
     with open("regions.txt", "r") as f:
         regions = f.read().splitlines()
     pop_csv = get_population_per_territory_csv(provinces_name + regions)
-    prov_region_mapping = get_prov_region_mapping(get_provinces_csv(date(2020, 2, 25)), provinces_name, provinces_abbr) # provides the mapping for each province to its region
+    prov_region_mapping = get_prov_region_mapping(get_provinces_csv(date(2020, 2, 25)), provinces_name,
+                                                  provinces_abbr)  # provides the mapping for each province to its region
     ratio = get_province_ratio(pop_csv, provinces_name, provinces_abbr, regions, prov_region_mapping)
     provs_indexed_csv = get_provinces_data_csv_indexed(starting_date, ending_date)
     regs_indexed_csv = get_regions_data_csv_indexed(starting_date, ending_date)
-    plotx={}
-    ploty={}
-    plotx["infect"] = [list() for index in provinces_abbr]
-    ploty["infect"] = [list() for index in provinces_abbr]
-    plotx["rat"] = [list() for index in provinces_abbr]
-    ploty["rat"] = [list() for index in provinces_abbr]
-    plotx["tests"] = [list() for index in provinces_abbr]
-    ploty["tests"] = [list() for index in provinces_abbr]
+    plotx = {}
+    ploty = {}
+    plotx["infect"] = initialize_plot(provinces_abbr)
+    ploty["infect"] = initialize_plot(provinces_abbr)
+    plotx["rat"] = initialize_plot(provinces_abbr)
+    ploty["rat"] = initialize_plot(provinces_abbr)
+    plotx["tests"] = initialize_plot(provinces_abbr)
+    ploty["tests"] = initialize_plot(provinces_abbr)
+    plotx["infect_n"] = initialize_plot(provinces_abbr)
+    ploty["infect_n"] = initialize_plot(provinces_abbr)
+    plotx["tests_n"] = initialize_plot(provinces_abbr)
+    ploty["tests_n"] = initialize_plot(provinces_abbr)
+    plotx["rat_n"] = initialize_plot(provinces_abbr)
+    ploty["rat_n"] = initialize_plot(provinces_abbr)
+    #for normalization
     distance = (ending_date - starting_date).days
-    for x in range(1, distance):
-        d = starting_date + timedelta(days=x)
-        tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d])
-        for i, province in enumerate(provinces_abbr):
-            newInfections = diff_infections_between_csv(province, provs_indexed_csv[d - timedelta(days=1)],
-                                                        provs_indexed_csv[d])
-            if newInfections is not None:
-                plotx["infect"][i].append(f"{d.day:02}/{d.month:02}")
-                ploty["infect"][i].append(newInfections)
-                if tests[province] is not None:
+    window_size = SMOOTH_DATA_DAYS_FACTOR * 2 + 1
+    infection_window = list()
+    test_window=list()
+    last_index = distance - 2
+    central_element_index=math.floor(window_size / 2)
 
-                    if newInfections==0:
-                        plotx["rat"][i].append(f"{d.day:02}/{d.month:02}")
-                        ploty["rat"][i].append(0)
+    for x in range(distance - 1):
+        d0 = starting_date + timedelta(days=x)
+        d = starting_date + timedelta(days=x + 1)
+        tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d0],regs_indexed_csv[d])
+        newInfections = diff_infections_between_csv(provs_indexed_csv[d0], provs_indexed_csv[d], provinces_abbr)
+
+        # window management
+        test_window.append(tests)
+        if len(test_window) > window_size:
+            test_window.pop(0)
+        infection_window.append(newInfections)
+        if len(infection_window) > window_size:
+            infection_window.pop(0)
+
+        for p_a, p_n in zip(provinces_abbr, provinces_name):
+            #classical plots
+            if newInfections[p_a] is not None:
+                plotx["infect"][p_a].append(f"{d.day:02}/{d.month:02}")
+                ploty["infect"][p_a].append(newInfections[p_a])
+                if tests[p_a] is not None:
+
+                    if newInfections[p_a] == 0:
+                        plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
+                        ploty["rat"][p_a].append(0)
                     else:
-                        if tests[province]==0:
-                            print(f"This dataset is really unreliable. Zero tests made on day {d} and {newInfections} new infections at {provinces_name[i]} {province}")
-                            plotx["rat"][i].append(f"{d.day:02}/{d.month:02}")
-                            ploty["rat"][i].append(1 * 100)
+                        if tests[p_a] == 0:  # I know, it's bad
+                            plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
+                            ploty["rat"][p_a].append(1 * 100)
                         else:
-                            plotx["rat"][i].append(f"{d.day:02}/{d.month:02}")
-                            val=newInfections/tests[province]
-                            if val>1:
-                                print(
-                                    f"This dataset is really unreliable. There are more infections than tests made on day {d} at {provinces_name[i]} {province}")
-                                val=1
-                            elif val<0:
-                                print(
-                                    f"This dataset is really unreliable. There is a negative variation on day {d} at {provinces_name[i]} {province}")
-                                val=0
-                            ploty["rat"][i].append(val*100)
-                    plotx["tests"][i].append(f"{d.day:02}/{d.month:02}")
-                    ploty["tests"][i].append(tests[province])
+                            plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
+                            val = newInfections[p_a] / tests[p_a]
+                            if val > 1:  # I know, it's bad
+                                val = 1
+                            elif val < 0:  # I know, it's bad
+                                val = 0
+                            ploty["rat"][p_a].append(val * 100)
+                    plotx["tests"][p_a].append(f"{d.day:02}/{d.month:02}")
+                    ploty["tests"][p_a].append(tests[p_a])
+            # normalized plots
+            province_inf_window = [ni[p_a] for ni in infection_window]
+            #todo refactor this sh1t
+            province_test_window= [ni[p_a] for ni in test_window]
+            # if the window had been filled for the first time
+            if x == window_size-1:
+                skipped_days = math.ceil(window_size / 2) #days still not registered
+                for sd in range(skipped_days):
+                    iterator_d = d - timedelta(days=skipped_days - (sd+1))
+                    formatted_date_str=f"{iterator_d.day:02}/{iterator_d.month:02}"
+                    plotx["infect_n"][p_a].append(formatted_date_str)
+                    inf_val=data_norm(province_inf_window, sd)
+                    ploty["infect_n"][p_a].append(inf_val)
 
-    total_saves=len(plotx)*len(provinces_name)
-    j=0
+                    test_val=data_norm(province_test_window, sd)
+                    plotx["tests_n"][p_a].append(formatted_date_str)
+                    ploty["tests_n"][p_a].append(test_val)
+
+                    if test_val==0 and inf_val >0: #it is bad, i know
+                        rat_val=100
+                    elif test_val==0 and inf_val <= 0: #adjustments
+                        rat_val = 0
+                    elif inf_val/test_val > 1: # still impossible, but it may happen with imprecise data
+                        rat_val=100
+                    else:
+                        rat_val=inf_val/test_val*100
+                    plotx["rat_n"][p_a].append(formatted_date_str)
+                    ploty["rat_n"][p_a].append(rat_val)
+
+            elif x >= window_size and x + central_element_index <= last_index:  #
+                formatted_date_str=f"{d.day:02}/{d.month:02}"
+                inf_val=data_norm(province_inf_window)
+                plotx["infect_n"][p_a].append(formatted_date_str)
+                ploty["infect_n"][p_a].append(inf_val)
+
+                test_val = data_norm(province_test_window)
+                plotx["tests_n"][p_a].append(formatted_date_str)
+                ploty["tests_n"][p_a].append(test_val)
+
+                if test_val == 0 and inf_val > 0:  # it is bad, i know
+                    rat_val = 100
+                elif test_val == 0 and inf_val <= 0:  # adjustments
+                    rat_val = 0
+                elif inf_val / test_val > 1:  # still impossible, but it may happen with imprecise data
+                    rat_val = 100
+                else:
+                    rat_val = inf_val / test_val * 100
+                plotx["rat_n"][p_a].append(formatted_date_str)
+                ploty["rat_n"][p_a].append(rat_val)
+            elif x + central_element_index > last_index:  # emptying the window, it is less precise
+                index = central_element_index+x
+                formatted_date_str=f"{d.day:02}/{d.month:02}"
+                inf_val=data_norm(province_inf_window, index)
+                plotx["infect_n"][p_a].append(formatted_date_str)
+                ploty["infect_n"][p_a].append(inf_val)
+                test_val = data_norm(province_test_window,index)
+                plotx["tests_n"][p_a].append(formatted_date_str)
+                ploty["tests_n"][p_a].append(test_val)
+
+                if test_val == 0 and inf_val > 0:  # it is bad, i know
+                    rat_val = 100
+                elif test_val == 0 and inf_val <= 0:  # adjustments
+                    rat_val = 0
+                elif inf_val / test_val > 1:  # still impossible, but it may happen with imprecise data
+                    rat_val = 100
+                else:
+                    rat_val = inf_val / test_val * 100
+                plotx["rat_n"][p_a].append(formatted_date_str)
+                ploty["rat_n"][p_a].append(rat_val)
+
+    total_saves = len(plotx) * len(provinces_name)
+    j = 0
+    print("Saving infection graphs, may require some time...")
     for k in plotx:
-        print("Saving infection graphs, may require some time...")
-        for i,province in enumerate(zip(provinces_name,provinces_abbr)):
-            print(f"{int(j/total_saves*100)}% done")
-            if k == "infect":
-                save_graph(plotx[k][i], ploty[k][i], f'Covid new infections per day in {province[0]} {province[1]}', 'Day', 'New infections')
-            elif k == "rat":
-                save_graph(plotx[k][i], ploty[k][i], f'Covid estimated growing rate in {province[0]} {province[1]}', 'Day',
-                           '% new infections/tests','./Covid_growing_est')
-            elif k == "tests":
-                save_graph(plotx[k][i], ploty[k][i], f'Covid estimated tests per day in {province[0]} {province[1]}',
-                           'Day',
-                           'Tests','./Covid_Tests_est')
-            j+=1
 
-    print("Done!")
+        for i, (p_name, p_abbr) in enumerate(zip(provinces_name, provinces_abbr)):
+            sys.stdout.write(f"\r{int(j / total_saves * 100)}% done")
+            sys.stdout.flush()
+            if k == "infect":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid new infections per day in {p_name} {p_abbr}',
+                           'Day', 'New infections')
+            elif k == "infect_n":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid new infections per day in {p_name} {p_abbr} normalized',
+                           'Day', 'New infections', './Covid_n')
+            elif k == "rat":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid infections per tests in {p_name} {p_abbr}',
+                           'Day',
+                           '% new infections/tests', './Covid_infection_per_test_est')
+            elif k == "rat_n":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid infections per tests in {p_name} {p_abbr} normalized',
+                           'Day',
+                           '% new infections/tests', './Covid_infection_per_test_est_n')
+            elif k == "tests":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid estimated tests per day in {p_name} {p_abbr}',
+                           'Day',
+                           'Tests', './Covid_Tests_est')
+            elif k == "tests_n":
+                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid estimated tests per day in {p_name} {p_abbr} normalized',
+                           'Day',
+                           'Tests', './Covid_Tests_est_n')
+            j += 1
+
+    print("\nDone!")
 
 
 if __name__ == "__main__":
+    if ENABLE_CACHE:
+        requests_cache.install_cache('req_cache.sqlite')
     main()
