@@ -6,8 +6,9 @@ from datetime import date, timedelta
 import concurrent.futures
 import sys
 import requests_cache
-#TODO add some decent comments to this code
-ENABLE_CACHE=True
+import pathlib
+
+# TODO add some decent comments to this code
 # I know, i should use panda for CSVs, cause Fiat Pandas are reliable, but I'm too lazy, sry
 
 SMOOTH_DATA_DAYS_FACTOR = 2  # how many days before and after should be considered to smooth data. if value is set to 1, each value gets smoothed with the day before and the day after
@@ -16,16 +17,56 @@ STDDEV_CRISPNESS = 1  # how the smoothness should be. if 1, 68.3% of the values 
 MAX_CONNECTIONS = 6  # https://stackoverflow.com/questions/985431/max-parallel-http-connections-in-a-browser
 SAVE_IMAGE_DPI = 300  # image saving quality
 
+
 # Possible future work, model with a markov chain smh
 # Markov chain: no_inf -> exp beginning -> stall -> decreasing ->no_inf
 #                                        --------->
+class Plot:
 
-def initialize_plot(p_a):
-    return {p: list() for p in p_a}
+    def __init__(self):
+        self.x = list()
+        self.y = list()
+
+    def save_plot(self, title, xlabel, ylabel, path):
+        return self.__plot(title, xlabel, ylabel, save=True, show=False, path=path)
+
+    def show_plot(self, title, xlabel, ylabel):
+        return self.__plot(title, xlabel, ylabel, save=False, show=True, path=None)
+
+    def __plot(self, title, xlabel, ylabel, save=True, show=False, path=None):
+        if type(path) == str and save:
+            path = pathlib.Path(path)
+        plt.plot(self.x, self.y, linestyle='dashed', linewidth=1, marker='o', markerfacecolor='blue', markersize=2)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.grid(True)
+
+        n_values = len(self.x)
+        howManyLabelsToPlot = math.ceil(n_values / 7) # one label per week
+        slidingWindow = (n_values-1)%7
+
+        ticks = [ (slidingWindow + i * 7) for i in range(howManyLabelsToPlot)]
+        # take one tick every 7 days. the " % len(x)" is to make it circular if the last tick is not included
+        lastTick = n_values - 1
+        assert lastTick in ticks
+        plt.xticks(ticks, rotation="vertical")
+        if save:
+            plt.savefig(f'{path / title}.png', dpi=SAVE_IMAGE_DPI)
+        if show:
+            plt.show()
+        plt.clf()
+
+    def append(self, x, y):
+        self.x.append(x)
+        self.y.append(y)
+
+
+
 
 
 def fdr_norm(value, dev_std, avg=0):  # fdr =
-    z = (value - avg )/dev_std # normalization
+    z = (value - avg) / dev_std  # normalization
     return 0.5 * (1 + math.erf(z / (math.sqrt(2))))  # Cumulative distribution function for norm distr
 
 
@@ -35,21 +76,21 @@ def data_norm(values, center_index=None):  # we need to normalize data
         center_index = math.floor(len(values) / 2)  # as default it is set to its central value,
         # cause we want to consider data relevance as shown here https://commons.wikimedia.org/wiki/File:Gaussian_Filter.svg
     normalized_value = 0
-    coeff_sum=0
+    coeff_sum = 0
     for i, val in enumerate(values):
         upper_bound = (i - center_index + 0.5)  # useless for last element
         lower_bound = upper_bound - 1  # useless for first element
         if i == len(values) - 1 and i == 0:
-            coeff=1
-        elif i == len(values) - 1: #last
-            coeff=1-fdr_norm(lower_bound, STDDEV_CRISPNESS)
+            coeff = 1
+        elif i == len(values) - 1:  # last
+            coeff = 1 - fdr_norm(lower_bound, STDDEV_CRISPNESS)
         elif i == 0:
-            coeff=fdr_norm(upper_bound, STDDEV_CRISPNESS)
+            coeff = fdr_norm(upper_bound, STDDEV_CRISPNESS)
         else:
             coeff = (fdr_norm(upper_bound, STDDEV_CRISPNESS) - fdr_norm(lower_bound, STDDEV_CRISPNESS))
         normalized_value += coeff * val
-        coeff_sum+=coeff
-    assert coeff_sum>1-sys.float_info.epsilon and coeff_sum<1+sys.float_info.epsilon
+        coeff_sum += coeff
+    assert coeff_sum > 1 - sys.float_info.epsilon and coeff_sum < 1 + sys.float_info.epsilon
     return normalized_value
 
 
@@ -225,37 +266,6 @@ def get_regions_data_csv_indexed(starting_date, ending_date):
     return indexed_csv
 
 
-def save_graph(x, y, title, xlabel, ylabel, path="./Covid"):
-    return plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=True, path=path)
-
-
-def plot_graph(x, y, title, xlabel, ylabel, save=True, dont_print=False, path="./Covid"):
-    plt.plot(x, y, linestyle='dashed', linewidth=1, marker='o', markerfacecolor='blue', markersize=2)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.grid(True)
-
-    howManyLabelsToPlot = math.floor(len(x) / 7)  # one label every 7 days
-    slidingWindow = (len(x) - 1) % 7  # useful to shift the grid
-    ticks = [(i * 7 + slidingWindow) % len(x) for i in range(howManyLabelsToPlot)]
-    # take one tick every 7 days. the " % len(x)" is to make it circular if the last tick is not included
-
-    lastTick = len(x) - 1
-    if lastTick not in ticks:
-        ticks.append(lastTick)
-    # firstTick=0 # from now on, this should be always inserted. Probably i may change the logic above and always insert the first tick. who knows
-    # if firstTick not in ticks:
-    #    ticks.insert(0,0)
-    plt.xticks(ticks,
-               rotation="vertical")  # was 45, but with 45 it is not aligned as you may intuitively think when watching the plot
-    if save:
-        plt.savefig(f'{path}/{title}.png', dpi=SAVE_IMAGE_DPI)
-    if not dont_print:
-        plt.show()
-    plt.clf()
-
-
 def get_prov_region_mapping(prov_csv_sample, provinces_name, provinces_abbr):
     prov_region_mapping = {}
     for row in prov_csv_sample:
@@ -303,19 +313,22 @@ def estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping,
     if daily_regs_csv is not None:
         tests_per_province = {}
         tests_per_region = {}
-        for l in daily_regs_csv:
-            tests_per_region[l["denominazione_regione"]] = int(l["tamponi"])
+        for lin in daily_regs_csv:
+            tests_per_region[lin["denominazione_regione"]] = int(lin["tamponi"])
         for p in provinces_abbr:
             tests_per_province[p] = tests_per_region[prov_region_mapping[p]] * ratio[p]
         return tests_per_province
     return None
-def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0,daily_regs_csv):
+
+
+def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0, daily_regs_csv):
     tests_per_province = {}
-    t0=estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0)
+    t0 = estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0)
     t = estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv)
     for p in provinces_abbr:
-        tests_per_province[p]=t[p]-t0[p]
+        tests_per_province[p] = t[p] - t0[p]
     return tests_per_province
+
 
 def main():
     starting_date = date(2020, 2, 24)
@@ -323,8 +336,8 @@ def main():
     provinces_name = list()
     provinces_abbr = list()
     with open("provinces.txt", "r") as f:
-        for l in f.read().splitlines():
-            tmp = l.split(' ')
+        for lin in f.read().splitlines():
+            tmp = lin.split(' ')
             provinces_name.append(tmp[0])
             provinces_abbr.append(tmp[1])
     with open("regions.txt", "r") as f:
@@ -335,32 +348,25 @@ def main():
     ratio = get_province_ratio(pop_csv, provinces_name, provinces_abbr, regions, prov_region_mapping)
     provs_indexed_csv = get_provinces_data_csv_indexed(starting_date, ending_date)
     regs_indexed_csv = get_regions_data_csv_indexed(starting_date, ending_date)
-    plotx = {}
-    ploty = {}
-    plotx["infect"] = initialize_plot(provinces_abbr)
-    ploty["infect"] = initialize_plot(provinces_abbr)
-    plotx["rat"] = initialize_plot(provinces_abbr)
-    ploty["rat"] = initialize_plot(provinces_abbr)
-    plotx["tests"] = initialize_plot(provinces_abbr)
-    ploty["tests"] = initialize_plot(provinces_abbr)
-    plotx["infect_n"] = initialize_plot(provinces_abbr)
-    ploty["infect_n"] = initialize_plot(provinces_abbr)
-    plotx["tests_n"] = initialize_plot(provinces_abbr)
-    ploty["tests_n"] = initialize_plot(provinces_abbr)
-    plotx["rat_n"] = initialize_plot(provinces_abbr)
-    ploty["rat_n"] = initialize_plot(provinces_abbr)
-    #for normalization
+    plots = {}
+    categories = ["infect", "infects per tests", "tests", "infect_n", "infects per tests_n", "tests_n"]
+
+    for c in categories:
+        plots[c] = {p: Plot() for p in provinces_abbr}
+
+    # for normalization
     distance = (ending_date - starting_date).days
-    window_size = SMOOTH_DATA_DAYS_FACTOR * 2 + 1
+    window_size = SMOOTH_DATA_DAYS_FACTOR * 2 + 1  # smooth data over
     infection_window = list()
-    test_window=list()
+    test_window = list()
     last_index = distance - 2
-    central_element_index=math.floor(window_size / 2)
+    central_element_index = math.floor(window_size / 2)
 
     for x in range(distance - 1):
         d0 = starting_date + timedelta(days=x)
         d = starting_date + timedelta(days=x + 1)
-        tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d0],regs_indexed_csv[d])
+        tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d0],
+                                                   regs_indexed_csv[d])
         newInfections = diff_infections_between_csv(provs_indexed_csv[d0], provs_indexed_csv[d], provinces_abbr)
 
         # window management
@@ -370,69 +376,60 @@ def main():
         infection_window.append(newInfections)
         if len(infection_window) > window_size:
             infection_window.pop(0)
-
         for p_a, p_n in zip(provinces_abbr, provinces_name):
-            #classical plots
+            # classical plots
+            formatted_date_str = f"{d.day:02}/{d.month:02}"
             if newInfections[p_a] is not None:
-                plotx["infect"][p_a].append(f"{d.day:02}/{d.month:02}")
-                ploty["infect"][p_a].append(newInfections[p_a])
+                plots["infect"][p_a].append(formatted_date_str, newInfections[p_a])
                 if tests[p_a] is not None:
 
                     if newInfections[p_a] == 0:
-                        plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
-                        ploty["rat"][p_a].append(0)
+                        plots["infects per tests"][p_a].append(formatted_date_str, 0)
                     else:
                         if tests[p_a] == 0:  # I know, it's bad
-                            plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
-                            ploty["rat"][p_a].append(1 * 100)
+                            plots["infects per tests"][p_a].append(formatted_date_str, 100)
                         else:
-                            plotx["rat"][p_a].append(f"{d.day:02}/{d.month:02}")
+
                             val = newInfections[p_a] / tests[p_a]
                             if val > 1:  # I know, it's bad
                                 val = 1
                             elif val < 0:  # I know, it's bad
                                 val = 0
-                            ploty["rat"][p_a].append(val * 100)
-                    plotx["tests"][p_a].append(f"{d.day:02}/{d.month:02}")
-                    ploty["tests"][p_a].append(tests[p_a])
+                            plots["infects per tests"][p_a].append(formatted_date_str, val * 100)
+                    plots["tests"][p_a].append(formatted_date_str, tests[p_a])
+
             # normalized plots
             province_inf_window = [ni[p_a] for ni in infection_window]
-            #todo refactor this sh1t
-            province_test_window= [ni[p_a] for ni in test_window]
+            # todo refactor this sh1t
+            province_test_window = [ni[p_a] for ni in test_window]
             # if the window had been filled for the first time
-            if x == window_size-1:
-                skipped_days = math.ceil(window_size / 2) #days still not registered
+            if x == window_size - 1:
+                skipped_days = math.ceil(window_size / 2)  # days still not registered
                 for sd in range(skipped_days):
-                    iterator_d = d - timedelta(days=skipped_days - (sd+1))
-                    formatted_date_str=f"{iterator_d.day:02}/{iterator_d.month:02}"
-                    plotx["infect_n"][p_a].append(formatted_date_str)
-                    inf_val=data_norm(province_inf_window, sd)
-                    ploty["infect_n"][p_a].append(inf_val)
+                    iterator_d = d - timedelta(days=skipped_days - (sd + 1))
+                    formatted_date_str = f"{iterator_d.day:02}/{iterator_d.month:02}"
+                    inf_val = data_norm(province_inf_window, sd)
+                    plots["infect_n"][p_a].append(formatted_date_str, inf_val)
 
-                    test_val=data_norm(province_test_window, sd)
-                    plotx["tests_n"][p_a].append(formatted_date_str)
-                    ploty["tests_n"][p_a].append(test_val)
+                    test_val = data_norm(province_test_window, sd)
+                    plots["tests_n"][p_a].append(formatted_date_str, test_val)
 
-                    if test_val==0 and inf_val >0: #it is bad, i know
-                        rat_val=100
-                    elif test_val==0 and inf_val <= 0: #adjustments
+                    if test_val == 0 and inf_val > 0:  # it is bad, i know
+                        rat_val = 100
+                    elif test_val == 0 and inf_val <= 0:  # adjustments
                         rat_val = 0
-                    elif inf_val/test_val > 1: # still impossible, but it may happen with imprecise data
-                        rat_val=100
+                    elif inf_val / test_val > 1:  # still impossible, but it may happen with imprecise data
+                        rat_val = 100
                     else:
-                        rat_val=inf_val/test_val*100
-                    plotx["rat_n"][p_a].append(formatted_date_str)
-                    ploty["rat_n"][p_a].append(rat_val)
+                        rat_val = inf_val / test_val * 100
+                    plots["infects per tests_n"][p_a].append(formatted_date_str, rat_val)
 
             elif x >= window_size and x + central_element_index <= last_index:  #
-                formatted_date_str=f"{d.day:02}/{d.month:02}"
-                inf_val=data_norm(province_inf_window)
-                plotx["infect_n"][p_a].append(formatted_date_str)
-                ploty["infect_n"][p_a].append(inf_val)
+                inf_val = data_norm(province_inf_window)
+                plots["infect_n"][p_a].append(formatted_date_str, inf_val)
 
                 test_val = data_norm(province_test_window)
-                plotx["tests_n"][p_a].append(formatted_date_str)
-                ploty["tests_n"][p_a].append(test_val)
+                plots["tests_n"][p_a].append(formatted_date_str, test_val)
 
                 if test_val == 0 and inf_val > 0:  # it is bad, i know
                     rat_val = 100
@@ -442,17 +439,13 @@ def main():
                     rat_val = 100
                 else:
                     rat_val = inf_val / test_val * 100
-                plotx["rat_n"][p_a].append(formatted_date_str)
-                ploty["rat_n"][p_a].append(rat_val)
+                plots["infects per tests_n"][p_a].append(formatted_date_str, rat_val)
             elif x + central_element_index > last_index:  # emptying the window, it is less precise
-                index = central_element_index+x
-                formatted_date_str=f"{d.day:02}/{d.month:02}"
-                inf_val=data_norm(province_inf_window, index)
-                plotx["infect_n"][p_a].append(formatted_date_str)
-                ploty["infect_n"][p_a].append(inf_val)
-                test_val = data_norm(province_test_window,index)
-                plotx["tests_n"][p_a].append(formatted_date_str)
-                ploty["tests_n"][p_a].append(test_val)
+                index = central_element_index + x
+                inf_val = data_norm(province_inf_window, index)
+                plots["infect_n"][p_a].append(formatted_date_str, inf_val)
+                test_val = data_norm(province_test_window, index)
+                plots["tests_n"][p_a].append(formatted_date_str, test_val)
 
                 if test_val == 0 and inf_val > 0:  # it is bad, i know
                     rat_val = 100
@@ -462,45 +455,39 @@ def main():
                     rat_val = 100
                 else:
                     rat_val = inf_val / test_val * 100
-                plotx["rat_n"][p_a].append(formatted_date_str)
-                ploty["rat_n"][p_a].append(rat_val)
+                plots["infects per tests_n"][p_a].append(formatted_date_str, rat_val)
 
-    total_saves = len(plotx) * len(provinces_name)
+    total_saves = len(plots) * len(provinces_name)
     j = 0
     print("Saving infection graphs, may require some time...")
-    for k in plotx:
-
+    path = pathlib.Path(__file__).parent
+    for k in plots:
         for i, (p_name, p_abbr) in enumerate(zip(provinces_name, provinces_abbr)):
             sys.stdout.write(f"\r{int(j / total_saves * 100)}% done")
             sys.stdout.flush()
             if k == "infect":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid new infections per day in {p_name} {p_abbr}',
-                           'Day', 'New infections')
+                plots[k][p_abbr].save_plot(f'Covid new infections per day in {p_name} {p_abbr}',
+                                           'Day', 'New infections', path / 'Covid')
             elif k == "infect_n":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid new infections per day in {p_name} {p_abbr} normalized',
-                           'Day', 'New infections', './Covid_n')
-            elif k == "rat":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid infections per tests in {p_name} {p_abbr}',
-                           'Day',
-                           '% new infections/tests', './Covid_infection_per_test_est')
-            elif k == "rat_n":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid infections per tests in {p_name} {p_abbr} normalized',
-                           'Day',
-                           '% new infections/tests', './Covid_infection_per_test_est_n')
+                plots[k][p_abbr].save_plot(f'Covid new infections per day in {p_name} {p_abbr} normalized',
+                                           'Day', 'New infections', path / 'Covid_n')
+            elif k == "infects per tests":
+                plots[k][p_abbr].save_plot(f'Covid infections per tests in {p_name} {p_abbr}',
+                                           'Day', '% new infections/tests', path / 'Covid_infection_per_test_est')
+            elif k == "infects per tests_n":
+                plots[k][p_abbr].save_plot(f'Covid infections per tests in {p_name} {p_abbr} normalized',
+                                           'Day', '% new infections/tests', path / 'Covid_infection_per_test_est_n')
             elif k == "tests":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid estimated tests per day in {p_name} {p_abbr}',
-                           'Day',
-                           'Tests', './Covid_Tests_est')
+                plots[k][p_abbr].save_plot(f'Covid estimated tests per day in {p_name} {p_abbr}',
+                                           'Day', 'Tests', path / 'Covid_Tests_est')
             elif k == "tests_n":
-                save_graph(plotx[k][p_abbr], ploty[k][p_abbr], f'Covid estimated tests per day in {p_name} {p_abbr} normalized',
-                           'Day',
-                           'Tests', './Covid_Tests_est_n')
+                plots[k][p_abbr].save_plot(f'Covid estimated tests per day in {p_name} {p_abbr} normalized', 'Day',
+                                           'Tests', path / 'Covid_Tests_est_n')
             j += 1
 
     print("\nDone!")
 
 
 if __name__ == "__main__":
-    if ENABLE_CACHE:
-        requests_cache.install_cache('req_cache.sqlite')
+    requests_cache.install_cache('req_cache.sqlite')
     main()
