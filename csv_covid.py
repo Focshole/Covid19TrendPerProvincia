@@ -1,4 +1,5 @@
 import csv
+import os
 import math
 import requests
 import matplotlib.pyplot as plt
@@ -11,8 +12,9 @@ import pathlib
 # TODO add some decent comments to this code
 # I know, i should use panda for CSVs, cause Fiat Pandas are reliable, but I'm too lazy, sry
 
-SMOOTH_DATA_DAYS_FACTOR = 2  # how many days before and after should be considered to smooth data. if value is set to 1, each value gets smoothed with the day before and the day after
-STDDEV_CRISPNESS = 1  # how the smoothness should be. if 1, 68.3% of the values are set considering the central day
+SMOOTH_DATA_DAYS_FACTOR = 2  # how many days before and after should be considered to smooth data. if value is set to
+# 1, each value gets smoothed with the day before and the day after
+STDDEV_CRISPNESS = 2  # how the smoothness should be. if 1, 68.3% of the values are set considering the central day
 
 MAX_CONNECTIONS = 6  # https://stackoverflow.com/questions/985431/max-parallel-http-connections-in-a-browser
 SAVE_IMAGE_DPI = 300  # image saving quality
@@ -43,10 +45,10 @@ class Plot:
         plt.grid(True)
 
         n_values = len(self.x)
-        howManyLabelsToPlot = math.ceil(n_values / 7) # one label per week
-        slidingWindow = (n_values-1)%7
+        howManyLabelsToPlot = math.ceil(n_values / 7)  # one label per week
+        slidingWindow = (n_values - 1) % 7
 
-        ticks = [ (slidingWindow + i * 7) for i in range(howManyLabelsToPlot)]
+        ticks = [(slidingWindow + i * 7) for i in range(howManyLabelsToPlot)]
         # take one tick every 7 days. the " % len(x)" is to make it circular if the last tick is not included
         lastTick = n_values - 1
         assert lastTick in ticks
@@ -62,9 +64,6 @@ class Plot:
         self.y.append(y)
 
 
-
-
-
 def fdr_norm(value, dev_std, avg=0):  # fdr =
     z = (value - avg) / dev_std  # normalization
     return 0.5 * (1 + math.erf(z / (math.sqrt(2))))  # Cumulative distribution function for norm distr
@@ -74,7 +73,8 @@ def data_norm(values, center_index=None):  # we need to normalize data
     assert type(values) == list  # center data with day in position math.floor(len(values)/2)
     if center_index is None:
         center_index = math.floor(len(values) / 2)  # as default it is set to its central value,
-        # cause we want to consider data relevance as shown here https://commons.wikimedia.org/wiki/File:Gaussian_Filter.svg
+        # cause we want to consider data relevance as shown here:
+        # https://commons.wikimedia.org/wiki/File:Gaussian_Filter.svg
     normalized_value = 0
     coeff_sum = 0
     for i, val in enumerate(values):
@@ -90,7 +90,7 @@ def data_norm(values, center_index=None):  # we need to normalize data
             coeff = (fdr_norm(upper_bound, STDDEV_CRISPNESS) - fdr_norm(lower_bound, STDDEV_CRISPNESS))
         normalized_value += coeff * val
         coeff_sum += coeff
-    assert coeff_sum > 1 - sys.float_info.epsilon and coeff_sum < 1 + sys.float_info.epsilon
+    assert 1 - sys.float_info.epsilon < coeff_sum < 1 + sys.float_info.epsilon
     return normalized_value
 
 
@@ -131,7 +131,7 @@ def pre_processing(csv_as_a_list):
                 csv_as_a_list[i]["Territorio"] = csv_as_a_list[i]["Territorio"].replace(" ", "-")
                 # to avoid problems in file naming
             elif csv_as_a_list[i]["Territorio"] == "Provincia Autonoma Bolzano" or csv_as_a_list[i][
-                "Territorio"] == "Provincia Autonoma Trento":
+                    "Territorio"] == "Provincia Autonoma Trento":
                 csv_as_a_list[i]["Territorio"] = csv_as_a_list[i]["Territorio"].replace("Provincia Autonoma ", "PA-")
     return csv_as_a_list
 
@@ -158,7 +158,8 @@ fn = ["data", "stato", "codice_regione", "denominazione_regione", "codice_provin
 
 
 def get_population_per_territory_csv(territory_names):
-    url = "https://dati.istat.it/Download.ashx?type=csv&Delimiter=%2c&IncludeTimeSeriesIdentifiers=False&LabelType=CodeAndLabel&LanguageCode=it"
+    url = "https://dati.istat.it/Download.ashx?type=csv&Delimiter=%2c&IncludeTimeSeriesIdentifiers=False&LabelType" \
+          "=CodeAndLabel&LanguageCode=it "
     csv_as_a_list = download_csv(url)
     if csv_as_a_list is None:  # istat services are offline
         # fetch the local file
@@ -171,7 +172,7 @@ def get_population_per_territory_csv(territory_names):
     for entry in csv_as_a_list:
         if "Territorio" in entry:
             if entry["SEXISTAT1"] == '9' and entry["ETA1"] == "TOTAL" and entry["STATCIV2"] == '99' and entry[
-                "Territorio"] in territory_names:  # include only stats for all sex, age and civil status
+                    "Territorio"] in territory_names:  # include only stats for all sex, age and civil status
                 reduced_csv.append(entry)
         else:
             print(f"Formato non riconosciuto. Url:{url}")
@@ -189,14 +190,16 @@ def get_regions_csv(d):
 
 def get_regions_csv_multithread(d):
     assert type(d) == date
-    url = f"https://raw.github.com/pcm-dpc/COVID-19/master/dati-regioni/dpc-covid19-ita-regioni-{d.year}{d.month:02}{d.day:02}.csv"
+    url = f"https://raw.github.com/pcm-dpc/COVID-19/master/dati-regioni/" \
+          f"dpc-covid19-ita-regioni-{d.year}{d.month:02}{d.day:02}.csv"
     print(f"Fetching {d} regions data...")
     return download_csv(url), d
 
 
 def get_provinces_csv_multithread(d):
     assert type(d) == date
-    url = f"https://raw.github.com/pcm-dpc/COVID-19/master/dati-province/dpc-covid19-ita-province-{d.year}{d.month:02}{d.day:02}.csv"
+    url = f"https://raw.github.com/pcm-dpc/COVID-19/master/dati-province/" \
+          f"dpc-covid19-ita-province-{d.year}{d.month:02}{d.day:02}.csv"
     print(f"Fetching {d} provinces data...")
     return download_csv(url), d
 
@@ -245,7 +248,7 @@ def get_provinces_data_csv_indexed(starting_date, ending_date):
     indexed_csv = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
         future_results = (executor.submit(get_provinces_csv_multithread, starting_date + timedelta(days=x)) for x in
-                          range(distance))
+                          range(distance + 1))
         for future in concurrent.futures.as_completed(future_results):
             try:
                 data = future.result()
@@ -259,7 +262,7 @@ def get_regions_data_csv_indexed(starting_date, ending_date):
     indexed_csv = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
         future_results = (executor.submit(get_regions_csv_multithread, starting_date + timedelta(days=x)) for x in
-                          range(distance))
+                          range(distance + 1))
         for future in concurrent.futures.as_completed(future_results):
             data = future.result()
             indexed_csv[data[1]] = data[0]
@@ -330,21 +333,89 @@ def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, rati
     return tests_per_province
 
 
-def main():
-    starting_date = date(2020, 2, 24)
-    ending_date = date.today()
-    provinces_name = list()
+def save_graphs_multiprocess(plots, provinces_name, provinces_abbr):
+    total_saves = len(plots) * len(provinces_name)
+
+    path = pathlib.Path(__file__).parent
+    fr = list()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max(1, len(os.sched_getaffinity(
+            0)) - 1)) as executor:  # to avoid making the system completely unusable, I have set it to nproc -1
+        for k in plots:
+            for i, (p_name, p_abbr) in enumerate(zip(provinces_name, provinces_abbr)):
+
+                sys.stdout.flush()
+                if k == "infect":
+                    fr.append(executor.submit(plots[k][p_abbr].save_plot,
+                                              f'Covid new infections per day in {p_name} {p_abbr}',
+                                              'Day', 'New infections', path / 'Covid'))
+                elif k == "infect_n":
+                    fr.append(executor.submit(plots[k][p_abbr].save_plot,
+                                              f'Covid new infections per day in {p_name} {p_abbr} normalized',
+                                              'Day', 'New infections', path / 'Covid_n'))
+                elif k == "infects per tests":
+                    fr.append(
+                        executor.submit(plots[k][p_abbr].save_plot, f'Covid infections per tests in {p_name} {p_abbr}',
+                                        'Day', '% new infections/tests', path / 'Covid_infection_per_test_est'))
+                elif k == "infects per tests_n":
+                    fr.append(executor.submit(plots[k][p_abbr].save_plot,
+                                              f'Covid infections per tests in {p_name} {p_abbr} normalized',
+                                              'Day', '% new infections/tests', path / 'Covid_infection_per_test_est_n'))
+                elif k == "tests":
+                    fr.append(executor.submit(plots[k][p_abbr].save_plot,
+                                              f'Covid estimated tests per day in {p_name} {p_abbr}',
+                                              'Day', 'Tests', path / 'Covid_Tests_est'))
+                elif k == "tests_n":
+                    fr.append(executor.submit(plots[k][p_abbr].save_plot,
+                                              f'Covid estimated tests per day in {p_name} {p_abbr} normalized', 'Day',
+                                              'Tests', path / 'Covid_Tests_est_n'))
+
+        j = 0
+        sys.stdout.write(f"\r0% done")
+        sys.stdout.flush()
+        for future in concurrent.futures.as_completed(fr):
+            try:
+                future.result()
+            finally:
+                j += 1
+                sys.stdout.write(f"\r{int(j / total_saves * 100)}% done")
+                sys.stdout.flush()
+
+
+def get_provinces_abbr_list(filename="provinces.txt"):
     provinces_abbr = list()
-    with open("provinces.txt", "r") as f:
+    with open(filename, "r") as f:
+        for lin in f.read().splitlines():
+            tmp = lin.split(' ')
+            provinces_abbr.append(tmp[1])
+    return provinces_abbr
+
+
+def get_provinces_name_list(filename="provinces.txt"):
+    provinces_name = list()
+    with open(filename, "r") as f:
         for lin in f.read().splitlines():
             tmp = lin.split(' ')
             provinces_name.append(tmp[0])
-            provinces_abbr.append(tmp[1])
-    with open("regions.txt", "r") as f:
-        regions = f.read().splitlines()
+    return provinces_name
+
+
+def get_regions_list(filename="regions.txt"):
+    with open(filename, "r") as f:
+        regions = list(f.read().splitlines())
+    return regions
+
+
+def main():
+    starting_date = date(2020, 2, 24)
+    ending_date = date.today()
+    provinces_name = get_provinces_name_list()
+
+    provinces_abbr = get_provinces_abbr_list()
+    regions = get_regions_list()
+
     pop_csv = get_population_per_territory_csv(provinces_name + regions)
-    prov_region_mapping = get_prov_region_mapping(get_provinces_csv(date(2020, 2, 25)), provinces_name,
-                                                  provinces_abbr)  # provides the mapping for each province to its region
+    prov_region_mapping = get_prov_region_mapping(get_provinces_csv(date(2020, 2, 26)), provinces_name,
+                                                  provinces_abbr)  # provides a mapping for each province to its region
     ratio = get_province_ratio(pop_csv, provinces_name, provinces_abbr, regions, prov_region_mapping)
     provs_indexed_csv = get_provinces_data_csv_indexed(starting_date, ending_date)
     regs_indexed_csv = get_regions_data_csv_indexed(starting_date, ending_date)
@@ -362,7 +433,7 @@ def main():
     last_index = distance - 2
     central_element_index = math.floor(window_size / 2)
 
-    for x in range(distance - 1):
+    for x in range(distance):
         d0 = starting_date + timedelta(days=x)
         d = starting_date + timedelta(days=x + 1)
         tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d0],
@@ -457,34 +528,8 @@ def main():
                     rat_val = inf_val / test_val * 100
                 plots["infects per tests_n"][p_a].append(formatted_date_str, rat_val)
 
-    total_saves = len(plots) * len(provinces_name)
-    j = 0
     print("Saving infection graphs, may require some time...")
-    path = pathlib.Path(__file__).parent
-    for k in plots:
-        for i, (p_name, p_abbr) in enumerate(zip(provinces_name, provinces_abbr)):
-            sys.stdout.write(f"\r{int(j / total_saves * 100)}% done")
-            sys.stdout.flush()
-            if k == "infect":
-                plots[k][p_abbr].save_plot(f'Covid new infections per day in {p_name} {p_abbr}',
-                                           'Day', 'New infections', path / 'Covid')
-            elif k == "infect_n":
-                plots[k][p_abbr].save_plot(f'Covid new infections per day in {p_name} {p_abbr} normalized',
-                                           'Day', 'New infections', path / 'Covid_n')
-            elif k == "infects per tests":
-                plots[k][p_abbr].save_plot(f'Covid infections per tests in {p_name} {p_abbr}',
-                                           'Day', '% new infections/tests', path / 'Covid_infection_per_test_est')
-            elif k == "infects per tests_n":
-                plots[k][p_abbr].save_plot(f'Covid infections per tests in {p_name} {p_abbr} normalized',
-                                           'Day', '% new infections/tests', path / 'Covid_infection_per_test_est_n')
-            elif k == "tests":
-                plots[k][p_abbr].save_plot(f'Covid estimated tests per day in {p_name} {p_abbr}',
-                                           'Day', 'Tests', path / 'Covid_Tests_est')
-            elif k == "tests_n":
-                plots[k][p_abbr].save_plot(f'Covid estimated tests per day in {p_name} {p_abbr} normalized', 'Day',
-                                           'Tests', path / 'Covid_Tests_est_n')
-            j += 1
-
+    save_graphs_multiprocess(plots, provinces_name, provinces_abbr)
     print("\nDone!")
 
 
