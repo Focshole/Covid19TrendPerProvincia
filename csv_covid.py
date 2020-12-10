@@ -328,9 +328,11 @@ def estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, rati
     tests_per_province = {}
     t0 = estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv0)
     t = estimated_cumulative_tests_per_province(provinces_abbr, prov_region_mapping, ratio, daily_regs_csv)
-    for p in provinces_abbr:
-        tests_per_province[p] = t[p] - t0[p]
-    return tests_per_province
+    if t is not None and t0 is not None:
+        for p in provinces_abbr:
+            tests_per_province[p] = t[p] - t0[p]
+        return tests_per_province
+    return None
 
 
 def save_graphs_multiprocess(plots, provinces_name, provinces_abbr):
