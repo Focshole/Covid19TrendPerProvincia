@@ -440,7 +440,10 @@ def main():
         d = starting_date + timedelta(days=x + 1)
         tests = estimated_daily_tests_per_province(provinces_abbr, prov_region_mapping, ratio, regs_indexed_csv[d0],
                                                    regs_indexed_csv[d])
-        newInfections = diff_infections_between_csv(provs_indexed_csv[d0], provs_indexed_csv[d], provinces_abbr)
+        if provs_indexed_csv[d] is not None and provs_indexed_csv[d0] is not None:
+            newInfections = diff_infections_between_csv(provs_indexed_csv[d0], provs_indexed_csv[d], provinces_abbr)
+        else:
+            continue
 
         # window management
         test_window.append(tests)
