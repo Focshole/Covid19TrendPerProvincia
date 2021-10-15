@@ -12,14 +12,14 @@ import pathlib
 # TODO add some decent comments to this code
 # I know, i should use panda for CSVs, cause Fiat Pandas are reliable, but I'm too lazy, sry
 
-SMOOTH_DATA_DAYS_FACTOR = 2  # how many days before and after should be considered to smooth data. if value is set to
+SMOOTH_DATA_DAYS_FACTOR = 3  # how many days before and after should be considered to smooth data. if value is set to
 # 1, each value gets smoothed with the day before and the day after
 STDDEV_CRISPNESS = 2  # how the smoothness should be. if 1, 68.3% of the values are set considering the central day
 
 MAX_CONNECTIONS = 6  # https://stackoverflow.com/questions/985431/max-parallel-http-connections-in-a-browser
 SAVE_IMAGE_DPI = 300  # image saving quality
 
-
+DAY_LABEL = 15 # add a label in the plot every DAY_LABEL days
 # Possible future work, model with a markov chain smh
 # Markov chain: no_inf -> exp beginning -> stall -> decreasing ->no_inf
 #                                        --------->
@@ -43,18 +43,24 @@ class Plot:
         plt.ylabel(ylabel)
         plt.title(title)
         plt.grid(True)
+        font = {
+        
+        'weight' : 'normal',
+        'size'   : 8}
+        plt.rc('font',**font)
+        
 
         n_values = len(self.x)
-        howManyLabelsToPlot = math.ceil(n_values / 7)  # one label per week
-        slidingWindow = (n_values - 1) % 7
+        howManyLabelsToPlot = math.ceil(n_values / DAY_LABEL)  # one label per DAY_LABEL
+        slidingWindow = (n_values - 1) % DAY_LABEL
 
-        ticks = [(slidingWindow + i * 7) for i in range(howManyLabelsToPlot)]
-        # take one tick every 7 days. the " % len(x)" is to make it circular if the last tick is not included
+        ticks = [(slidingWindow + i * DAY_LABEL) for i in range(howManyLabelsToPlot)]
+        # take one tick every DAY_LABEL days. the " % len(x)" is to make it circular if the last tick is not included
         lastTick = n_values - 1
         assert lastTick in ticks
         plt.xticks(ticks, rotation="vertical")
         if save:
-            plt.savefig(f'{path / title}.png', dpi=SAVE_IMAGE_DPI)
+            plt.savefig(f'{path / title}.png', dpi=SAVE_IMAGE_DPI,bbox_inches='tight')
         if show:
             plt.show()
         plt.clf()
@@ -149,7 +155,7 @@ def download_csv(url):
         csv_file_splitted = (file_content.decode("UTF-8")).splitlines()
         csv_file_reader = csv.DictReader(csv_file_splitted)
         csv_as_a_list = list(csv_file_reader)
-        # Pre processing, it is extremely ugly. I'm lazy and I don't want to refactor it by now
+        # Pre processing, it is extremely ugly. I'm lazy and I don't want to refactor it now
         return pre_processing(csv_as_a_list)
 
 
@@ -158,10 +164,11 @@ fn = ["data", "stato", "codice_regione", "denominazione_regione", "codice_provin
 
 
 def get_population_per_territory_csv(territory_names):
-    url = "https://dati.istat.it/Download.ashx?type=csv&Delimiter=%2c&IncludeTimeSeriesIdentifiers=False&LabelType" \
-          "=CodeAndLabel&LanguageCode=it "
-    csv_as_a_list = download_csv(url)
-    if csv_as_a_list is None:  # istat services are offline
+    #url = "https://dati.istat.it/Download.ashx?type=csv&Delimiter=%2c&IncludeTimeSeriesIdentifiers=False&LabelType" \
+    #      "=CodeAndLabel&LanguageCode=it "
+    #csv_as_a_list = download_csv(url)
+    csv_as_a_list = None
+    if csv_as_a_list is None:  # istat services changed their format, use the offline csv
         # fetch the local file
         with open("DCIS_POPRES1_14102020171844268.csv", "r") as f:
             csv_file_splitted = f.read().splitlines()
@@ -175,7 +182,7 @@ def get_population_per_territory_csv(territory_names):
                     "Territorio"] in territory_names:  # include only stats for all sex, age and civil status
                 reduced_csv.append(entry)
         else:
-            print(f"Formato non riconosciuto. Url:{url}")
+            # print(f"Formato non riconosciuto. Url:{url}")
             exit(-1)
     return reduced_csv
 
@@ -454,7 +461,7 @@ def main():
             infection_window.pop(0)
         for p_a, p_n in zip(provinces_abbr, provinces_name):
             # classical plots
-            formatted_date_str = f"{d.day:02}/{d.month:02}"
+            formatted_date_str = f"{d.day:02}/{d.month:02}/{d.year%100:02}"
             if newInfections[p_a] is not None:
                 plots["infect"][p_a].append(formatted_date_str, newInfections[p_a])
                 if tests[p_a] is not None:
@@ -483,7 +490,7 @@ def main():
                 skipped_days = math.ceil(window_size / 2)  # days still not registered
                 for sd in range(skipped_days):
                     iterator_d = d - timedelta(days=skipped_days - (sd + 1))
-                    formatted_date_str = f"{iterator_d.day:02}/{iterator_d.month:02}"
+                    formatted_date_str = f"{iterator_d.day:02}/{iterator_d.month:02}/{iterator_d.year%100:02}"
                     inf_val = data_norm(province_inf_window, sd)
                     plots["infect_n"][p_a].append(formatted_date_str, inf_val)
 
